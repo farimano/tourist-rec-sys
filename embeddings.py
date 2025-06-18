@@ -39,4 +39,6 @@ class TextToEmbedding:
             convert_to_numpy=True,
             normalize_embeddings=True,
         )
-        return embs[:-1].mean(axis=0)
+        avg_embs = embs[:-1].mean(axis=0)
+        norm_avg_embs = avg_embs / (avg_embs**2).sum() ** 0.5
+        return norm_avg_embs

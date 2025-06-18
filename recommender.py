@@ -26,8 +26,7 @@ FEATURES = [
     "geo_sim",
     "geo_pop",
 ]
-ID_COLS = ["author", "geo"]
-LABEL_COL = "label"
+UNKNOWN_USER_ID = 0
 
 
 @dataclass
@@ -162,9 +161,8 @@ class GeoRecommender:
             .rename(columns={"index": "author"})
             .explode("sim_author")
             .assign(sim_val=pd.Series([i for i in sim_vals]).explode().values)
-            .query("sim_author!=0")
+            .query("sim_author!=@UNKNOWN_USER_ID")
             .assign(sim_author=lambda x: x["sim_author"].map(self.user_id2user))
-            .query("author!=sim_author")
             .merge(
                 self.geo_author_stats,
                 left_on="sim_author",
@@ -276,7 +274,7 @@ class GeoRecommender:
             mr_user_raw_recs = (
                 mr_user_raw_recs.assign(
                     # Removes macroregion recommendation to encourage
-                    # recommending a more specific location for macroregion if 
+                    # recommending a more specific location for macroregion if
                     # available
                     to_shift=lambda x: x["cntr"].isna().cummax().astype(int),
                     shifted_score=lambda x: x["score"].shift(1).fillna(0),
@@ -295,7 +293,7 @@ class GeoRecommender:
                 country_user_raw_recs = (
                     country_user_raw_recs.assign(
                         # Removes country recommendation to encourage
-                        # recommending a more specific location for country if 
+                        # recommending a more specific location for country if
                         # available
                         to_shift=lambda x: x["city"].isna().cummax().astype(int),
                         shifted_score=lambda x: x["score"].shift(1).fillna(0),
