@@ -79,7 +79,7 @@ class GeoRecommender:
         with open(f"{self.data_path}/nafill_dict.json", "r") as f:
             self.nafill_dict = {i: float(j) for i, j in json.load(f).items()}
 
-        # Statistics about how users interact with locations
+        # Aggregated statistics of authors by geography
         self.geo_author_stats = pd.read_csv(f"{self.data_path}/geo_author_stats.csv")
 
         # Index with location embeddings
@@ -94,11 +94,12 @@ class GeoRecommender:
         self.geos_sorted_by_popularity = geo_pop_df["geo"].to_list()
         self.geo_popularity = geo_pop_df.set_index("geo")["pop"].to_dict()
 
+        # Load ranking model if not provided
         if self.ranker is None:
             self.ranker = CatBoostRanker()
             self.ranker.load_model(f"{self.data_path}/ranker.cbm")
 
-        # Mapping of location codes to textual representation
+        # Mapping of location codes to city/country/macroregion representation
         self.geo_mapping = pd.read_csv(f"{self.data_path}/geo_mapping.csv")
 
     def __del__(self) -> None:
