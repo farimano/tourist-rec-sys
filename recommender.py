@@ -275,8 +275,9 @@ class GeoRecommender:
                 continue
             mr_user_raw_recs = (
                 mr_user_raw_recs.assign(
-                    # If a macro-region lacks country details, shift its score to
-                    # encourage recommending a more specific country if available
+                    # Removes macroregion recommendation to encourage
+                    # recommending a more specific location for macroregion if 
+                    # available
                     to_shift=lambda x: x["cntr"].isna().cummax().astype(int),
                     shifted_score=lambda x: x["score"].shift(1).fillna(0),
                 )
@@ -293,8 +294,9 @@ class GeoRecommender:
                     continue
                 country_user_raw_recs = (
                     country_user_raw_recs.assign(
-                        # Shift again when city information is missing so a
-                        # specific city outranks the broader country
+                        # Removes country recommendation to encourage
+                        # recommending a more specific location for country if 
+                        # available
                         to_shift=lambda x: x["city"].isna().cummax().astype(int),
                         shifted_score=lambda x: x["score"].shift(1).fillna(0),
                     )
