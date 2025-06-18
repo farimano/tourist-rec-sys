@@ -1,65 +1,14 @@
+import json
+from dataclasses import dataclass, field
+from typing import Optional
+
+import faiss
+import kagglehub
 import numpy as np
 import pandas as pd
-import faiss
-import json
 from catboost import CatBoostRanker
 
-from dataclasses import dataclass
-import kagglehub
-
-data_path = kagglehub.dataset_download(
-    "farimanguliev/required-data-and-models-for-recommendation-system"
-)
-print(data_path)
-
-
-users_index_path = f"{data_path}/users_flatip.index"
-users_index = faiss.read_index(users_index_path)
-
-avg_user_emb = (
-    faiss.rev_swig_ptr(users_index.get_xb(), users_index.ntotal * users_index.d)
-    .reshape(users_index.ntotal, -1)
-    .mean(axis=0)
-)
-avg_user_emb = (avg_user_emb / (avg_user_emb**2).sum() ** 0.5).reshape(1, -1)
-
-
-user_id2user_path = f"{data_path}/user_id2user.json"
-
-with open(user_id2user_path, "r") as f:
-    user_id2user = json.load(f)
-    user_id2user = {int(i): j for i, j in user_id2user.items()}
-
-nafill_dict_path = f"{data_path}/nafill_dict.json"
-
-with open(nafill_dict_path, "r") as f:
-    nafill_dict = json.load(f)
-    nafill_dict = {i: float(j) for i, j in nafill_dict.items()}
-
-geo_author_stats_path = f"{data_path}/geo_author_stats.csv"
-geo_author_stats = pd.read_csv(geo_author_stats_path)
-
-geo_index_path = f"{data_path}/geo_flatip.index"
-geo_index = faiss.read_index(geo_index_path)
-
-geo2geo_id_path = f"{data_path}/geo2geo_id.json"
-with open(geo2geo_id_path, "r") as f:
-    geo2geo_id = json.load(f)
-    geo2geo_id = {i: int(j) for i, j in geo2geo_id.items()}
-
-geo_pop_path = f"{data_path}/geo_pop.csv"
-
-geo_pop_df = pd.read_csv(geo_pop_path)
-geos_sorted_by_popularity = geo_pop_df["geo"].to_list()
-geo_popularity = geo_pop_df.set_index("geo")["pop"].to_dict()
-
-ranker_path = f"{data_path}/ranker.cbm"
-
-cb_ranker = CatBoostRanker()
-cb_ranker.load_model(ranker_path)
-
-geo_mapping_path = f"{data_path}/geo_mapping.csv"
-geo_mapping = pd.read_csv(geo_mapping_path)
+DATASET_PATH = "farimanguliev/required-data-and-models-for-recommendation-system"
 
 FEATURES = [
     "user_sim_mean",
@@ -79,16 +28,67 @@ LABEL_COL = "label"
 
 @dataclass
 class GeoRecommender:
-    ranker: CatBoostRanker
+    ranker: Optional[CatBoostRanker] = None
+    data_path: Optional[str] = None
     top_n_users: int = 100
     top_k_countries: int = 500
     top_recs: int = 20
 
-    def enrish_df_with_stats(
+    users_index: faiss.Index = field(init=False)
+    avg_user_emb: np.ndarray = field(init=False)
+    user_id2user: dict = field(init=False)
+    nafill_dict: dict = field(init=False)
+    geo_author_stats: pd.DataFrame = field(init=False)
+    geo_index: faiss.Index = field(init=False)
+    geo2geo_id: dict = field(init=False)
+    geo_popularity: dict = field(init=False)
+    geos_sorted_by_popularity: list = field(init=False)
+    geo_mapping: pd.DataFrame = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.data_path = self.data_path or kagglehub.dataset_download(DATASET_PATH)
+
+        self.users_index = faiss.read_index(f"{self.data_path}/users_flatip.index")
+        avg_user_emb = (
+            faiss.rev_swig_ptr(
+                self.users_index.get_xb(),
+                self.users_index.ntotal * self.users_index.d,
+            )
+            .reshape(self.users_index.ntotal, -1)
+            .mean(axis=0)
+        )
+        self.avg_user_emb = (avg_user_emb / (avg_user_emb**2).sum() ** 0.5).reshape(
+            1, -1
+        )
+
+        with open(f"{self.data_path}/user_id2user.json", "r") as f:
+            self.user_id2user = {int(i): j for i, j in json.load(f).items()}
+
+        with open(f"{self.data_path}/nafill_dict.json", "r") as f:
+            self.nafill_dict = {i: float(j) for i, j in json.load(f).items()}
+
+        self.geo_author_stats = pd.read_csv(f"{self.data_path}/geo_author_stats.csv")
+
+        self.geo_index = faiss.read_index(f"{self.data_path}/geo_flatip.index")
+
+        with open(f"{self.data_path}/geo2geo_id.json", "r") as f:
+            self.geo2geo_id = {i: int(j) for i, j in json.load(f).items()}
+
+        geo_pop_df = pd.read_csv(f"{self.data_path}/geo_pop.csv")
+        self.geos_sorted_by_popularity = geo_pop_df["geo"].to_list()
+        self.geo_popularity = geo_pop_df.set_index("geo")["pop"].to_dict()
+
+        if self.ranker is None:
+            self.ranker = CatBoostRanker()
+            self.ranker.load_model(f"{self.data_path}/ranker.cbm")
+
+        self.geo_mapping = pd.read_csv(f"{self.data_path}/geo_mapping.csv")
+
+    def enrich_df_with_stats(
         self, df_base: pd.DataFrame, custom_users_embs: pd.DataFrame
     ):
         users2sims_with_avg_user = (
-            (custom_users_embs @ avg_user_emb.T).squeeze(axis=1).to_dict()
+            (custom_users_embs @ self.avg_user_emb.T).squeeze(axis=1).to_dict()
         )
         enriched_df = (
             df_base.assign(
@@ -96,11 +96,11 @@ class GeoRecommender:
             )
             .assign(
                 n_users=0,
-                sent_neg_min=nafill_dict["sent_neg"],
-                sent_pos_min=nafill_dict["sent_pos"],
-                w_sent_neg_mean=nafill_dict["sent_neg"],
-                w_sent_pos_mean=nafill_dict["sent_pos"],
-                w_score_mean=nafill_dict["score"],
+                sent_neg_min=self.nafill_dict["sent_neg"],
+                sent_pos_min=self.nafill_dict["sent_pos"],
+                w_sent_neg_mean=self.nafill_dict["sent_neg"],
+                w_sent_pos_mean=self.nafill_dict["sent_pos"],
+                w_score_mean=self.nafill_dict["score"],
                 w_n_mentions_mean=0,
             )
             .reset_index(drop=True)
@@ -108,9 +108,9 @@ class GeoRecommender:
         return enriched_df
 
     def get_features(self, custom_users_embs: pd.DataFrame) -> pd.DataFrame:
-        top_k_geos = set(geos_sorted_by_popularity[: self.top_k_countries])
+        top_k_geos = set(self.geos_sorted_by_popularity[: self.top_k_countries])
 
-        sim_vals, sim_users = users_index.search(
+        sim_vals, sim_users = self.users_index.search(
             custom_users_embs.values, 1 + self.top_n_users
         )
         nearest_users_feats = (
@@ -122,10 +122,10 @@ class GeoRecommender:
             .explode("sim_author")
             .assign(sim_val=pd.Series([i for i in sim_vals]).explode().values)
             .query("sim_author!=0")
-            .assign(sim_author=lambda x: x["sim_author"].map(user_id2user))
+            .assign(sim_author=lambda x: x["sim_author"].map(self.user_id2user))
             .query("author!=sim_author")
             .merge(
-                geo_author_stats,
+                self.geo_author_stats,
                 left_on="sim_author",
                 right_on="author",
                 suffixes=["", "_right"],
@@ -160,7 +160,7 @@ class GeoRecommender:
             .reset_index(drop=True)
         )
 
-        popular_locations_feats = self.enrish_df_with_stats(
+        popular_locations_feats = self.enrich_df_with_stats(
             pd.Series({"author": custom_users_embs.index.tolist(), "geo": top_k_geos})
             .to_frame()
             .T.explode("author")
@@ -183,25 +183,27 @@ class GeoRecommender:
         for author, author_feats in feats.groupby("author"):
 
             geo_ids_np = (
-                author_feats["geo"].map(geo2geo_id).to_numpy(dtype="int64", copy=False)
+                author_feats["geo"]
+                .map(self.geo2geo_id)
+                .to_numpy(dtype="int64", copy=False)
             )
             geo_selector = faiss.IDSelectorBatch(
                 geo_ids_np.size, faiss.swig_ptr(geo_ids_np)
             )
             geo_params = faiss.SearchParameters()
             geo_params.sel = geo_selector
-            geo_sims, geo_idxs = geo_index.search(
+            geo_sims, geo_idxs = self.geo_index.search(
                 custom_users_embs.loc[author].values.reshape(1, -1),
                 len(geo_ids_np),
                 params=geo_params,
             )
             feats.loc[author_feats.index, "geo_sim"] = (
                 author_feats["geo"]
-                .map(geo2geo_id)
+                .map(self.geo2geo_id)
                 .map(dict(zip(geo_idxs[0], geo_sims[0])))
             )
 
-        feats.loc[:, "geo_pop"] = feats["geo"].map(geo_popularity)
+        feats.loc[:, "geo_pop"] = feats["geo"].map(self.geo_popularity)
 
         return feats
 
@@ -219,7 +221,7 @@ class GeoRecommender:
         prep_recs_list = []
         for _, mr_user_raw_recs in (
             feats[["author", "geo", "score"]]
-            .merge(geo_mapping, on="geo", how="left")
+            .merge(self.geo_mapping, on="geo", how="left")
             .sort_values(["author", "score"], ascending=[True, False])
             .groupby(["author", "mr"])
         ):
@@ -261,7 +263,7 @@ class GeoRecommender:
             .groupby(["author", "geo"])
             .head(1)
             .groupby(["author"])
-            .head(20)
+            .head(self.top_recs)
             .sort_values(["author", "score"], ascending=[True, False])[
                 ["author", "geo"]
             ]
