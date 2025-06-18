@@ -1,3 +1,5 @@
+"""Recommender logic for suggesting destinations based on text embeddings."""
+
 import json
 import os
 import shutil
@@ -30,7 +32,12 @@ LABEL_COL = "label"
 
 @dataclass
 class GeoRecommender:
-    """Recommend locations for a user based on text embeddings."""
+    """Recommend locations for a user based on text embeddings.
+
+    The class lazily downloads all required artefacts (FAISS indices, pre
+    computed statistics and the ranking model) from Kaggle when a custom
+    path is not provided.
+    """
 
     ranker: Optional[CatBoostRanker] = None
     data_path: Optional[str] = None
@@ -51,6 +58,8 @@ class GeoRecommender:
     _data_downloaded: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
+        """Load indexes and auxiliary data required for recommendation."""
+
         # Download dataset if path not provided and mark for cleanup
         if self.data_path is None:
             self.data_path = kagglehub.dataset_download(DATASET_PATH)
@@ -110,6 +119,12 @@ class GeoRecommender:
     def enrich_df_with_stats(
         self, df_base: pd.DataFrame, custom_users_embs: pd.DataFrame
     ):
+        """Fill a dataframe with statistics derived from average embeddings.
+
+        This is used when no similar users exist for a given location: the
+        similarity to the average user acts as a prior for ranking.
+        """
+        # Pre-compute similarity of custom users to the average user vector
         users2sims_with_avg_user = (
             (custom_users_embs @ self.avg_user_emb.T).squeeze(axis=1).to_dict()
         )
@@ -131,11 +146,14 @@ class GeoRecommender:
         return enriched_df
 
     def get_features(self, custom_users_embs: pd.DataFrame) -> pd.DataFrame:
+        """Build a feature dataframe for the provided user embeddings."""
+
         top_k_geos = set(self.geos_sorted_by_popularity[: self.top_k_countries])
 
         sim_vals, sim_users = self.users_index.search(
             custom_users_embs.values, 1 + self.top_n_users
         )
+        # Aggregate statistics from the most similar users
         nearest_users_feats = (
             pd.Series(
                 [i for i in sim_users], index=custom_users_embs.index, name="sim_author"
@@ -183,6 +201,7 @@ class GeoRecommender:
             .reset_index(drop=True)
         )
 
+        # Also consider popular locations even if no similar user visited them
         popular_locations_feats = self.enrich_df_with_stats(
             pd.Series({"author": custom_users_embs.index.tolist(), "geo": top_k_geos})
             .to_frame()
@@ -204,7 +223,8 @@ class GeoRecommender:
         feats.reset_index(drop=True, inplace=True)
 
         for author, author_feats in feats.groupby("author"):
-
+            # Compute similarities only for the candidate locations selected
+            # for this author
             geo_ids_np = (
                 author_feats["geo"]
                 .map(self.geo2geo_id)
@@ -231,6 +251,8 @@ class GeoRecommender:
         return feats
 
     def get_recommendations(self, embeddings: np.array):
+        """Return a dataframe of location recommendations for the given embeddings."""
+
         if len(embeddings.shape) == 1:
             embeddings = embeddings.reshape(1, -1)
         users = [f"custom_user_{i}" for i in range(embeddings.shape[0])]
@@ -253,6 +275,8 @@ class GeoRecommender:
                 continue
             mr_user_raw_recs = (
                 mr_user_raw_recs.assign(
+                    # If a macro-region lacks country details, shift its score to
+                    # encourage recommending a more specific country if available
                     to_shift=lambda x: x["cntr"].isna().cummax().astype(int),
                     shifted_score=lambda x: x["score"].shift(1).fillna(0),
                 )
@@ -269,6 +293,8 @@ class GeoRecommender:
                     continue
                 country_user_raw_recs = (
                     country_user_raw_recs.assign(
+                        # Shift again when city information is missing so a
+                        # specific city outranks the broader country
                         to_shift=lambda x: x["city"].isna().cummax().astype(int),
                         shifted_score=lambda x: x["score"].shift(1).fillna(0),
                     )
