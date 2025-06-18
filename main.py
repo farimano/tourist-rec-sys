@@ -1,4 +1,4 @@
-from recommender import GeoRecommender, cb_ranker
+from recommender import GeoRecommender
 from embeddings import TextToEmbedding
 
 posts = [
@@ -9,7 +9,7 @@ posts = [
 
 if __name__ == "__main__":
     emb_model = TextToEmbedding()
-    recommender = GeoRecommender(cb_ranker)
+    recommender = GeoRecommender()
     embeddings = emb_model(posts)
     recs = recommender.get_recommendations(embeddings)
     print(recs)
