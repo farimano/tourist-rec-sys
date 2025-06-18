@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -46,11 +48,17 @@ class GeoRecommender:
     geo_popularity: dict = field(init=False)
     geos_sorted_by_popularity: list = field(init=False)
     geo_mapping: pd.DataFrame = field(init=False)
+    _data_downloaded: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
-        self.data_path = self.data_path or kagglehub.dataset_download(DATASET_PATH)
+        # Download dataset if path not provided and mark for cleanup
+        if self.data_path is None:
+            self.data_path = kagglehub.dataset_download(DATASET_PATH)
+            self._data_downloaded = True
 
+        # Load FAISS index with users' embeddings
         self.users_index = faiss.read_index(f"{self.data_path}/users_flatip.index")
+        # Compute the mean embedding over all users for later normalization
         avg_user_emb = (
             faiss.rev_swig_ptr(
                 self.users_index.get_xb(),
@@ -63,28 +71,41 @@ class GeoRecommender:
             1, -1
         )
 
+        # Mapping from internal user ids to usernames
         with open(f"{self.data_path}/user_id2user.json", "r") as f:
             self.user_id2user = {int(i): j for i, j in json.load(f).items()}
 
+        # Pre-computed statistics used to fill missing values
         with open(f"{self.data_path}/nafill_dict.json", "r") as f:
             self.nafill_dict = {i: float(j) for i, j in json.load(f).items()}
 
+        # Aggregated statistics of authors by geography
         self.geo_author_stats = pd.read_csv(f"{self.data_path}/geo_author_stats.csv")
 
+        # Index with location embeddings
         self.geo_index = faiss.read_index(f"{self.data_path}/geo_flatip.index")
 
+        # Mapping from location names to index ids
         with open(f"{self.data_path}/geo2geo_id.json", "r") as f:
             self.geo2geo_id = {i: int(j) for i, j in json.load(f).items()}
 
+        # Load location popularity information
         geo_pop_df = pd.read_csv(f"{self.data_path}/geo_pop.csv")
         self.geos_sorted_by_popularity = geo_pop_df["geo"].to_list()
         self.geo_popularity = geo_pop_df.set_index("geo")["pop"].to_dict()
 
+        # Load ranking model if not provided
         if self.ranker is None:
             self.ranker = CatBoostRanker()
             self.ranker.load_model(f"{self.data_path}/ranker.cbm")
 
+        # Mapping of location codes to city/country/macroregion representation
         self.geo_mapping = pd.read_csv(f"{self.data_path}/geo_mapping.csv")
+
+    def __del__(self) -> None:
+        """Remove downloaded data when instance is destroyed."""
+        if self._data_downloaded and os.path.isdir(self.data_path):
+            shutil.rmtree(self.data_path, ignore_errors=True)
 
     def enrich_df_with_stats(
         self, df_base: pd.DataFrame, custom_users_embs: pd.DataFrame
