@@ -28,6 +28,8 @@ LABEL_COL = "label"
 
 @dataclass
 class GeoRecommender:
+    """Recommend locations for a user based on text embeddings."""
+
     ranker: Optional[CatBoostRanker] = None
     data_path: Optional[str] = None
     top_n_users: int = 100
