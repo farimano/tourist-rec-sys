@@ -1,0 +1,11 @@
+{
+  "dataset_name": "synthetic-metric-smoke-v1",
+  "evaluation_kind": "synthetic_smoke",
+  "split_description": "Hand-authored metric fixtures, not a train/test split or real relevance judgments.",
+  "cases": [
+    {"query_id": "two-positives", "relevant_geos": ["SYN_A", "SYN_C"]},
+    {"query_id": "late-hit", "relevant_geos": ["SYN_D"]},
+    {"query_id": "no-results", "relevant_geos": ["SYN_B"]},
+    {"query_id": "unjudged", "relevant_geos": []}
+  ]
+}

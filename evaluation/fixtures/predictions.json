@@ -1,0 +1,8 @@
+{
+  "predictions": {
+    "two-positives": ["SYN_A", "SYN_B", "SYN_C"],
+    "late-hit": ["SYN_C", "SYN_D", "SYN_A"],
+    "no-results": [],
+    "unjudged": ["SYN_B"]
+  }
+}
